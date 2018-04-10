@@ -1,4 +1,4 @@
-function[figHandle, results]= feAndAFQqualityCheck(fe, classification, saveDir)
+function[figHandle, results]= bsc_feAndAFQqualityCheck(fe, classification, saveDir)
 %function[figHandle, results]= bsc_feAndAFQqualityCheck(fe, afq_classificiation, saveDir)
 %
 % This function computes a number of statistics for an input fe structure,
@@ -55,6 +55,13 @@ wbFG=feGet(fe,'fibers acpc');
 % in the fe.fg structure are in image space (which would result in oddities
 % when computing lengths)
 
+for inames=1:length(classification.names)
+leftNames(inames)=~isempty(strfind(classification.names{inames},'Left'));
+rightNames(inames)=~isempty(strfind(classification.names{inames},'Right'));
+interHemiNames(inames)=~leftNames(inames) & ~rightNames(inames);
+end
+
+
 
 % gets positively weighted streamlines and their indexes
 posIndexes=find(fe.life.fit.weights>0);
@@ -71,15 +78,20 @@ pos_fg.fibers=wbFG.fibers(posIndexes);
 
 
 %% resultStrucStuff
-% computes length of positively weighted streamlines
+% computes length  of positively weighted streamlines
+
 for istreamlines=1:length(pos_fg.fibers)
     pos_fg_streamLengths(istreamlines)=sum(sqrt(sum(diff(pos_fg.fibers{istreamlines},1,2).^2)));
+   
 end
 
-% Computes length of all streamlines
+
+% Computes length  of all streamlines
 for istreamlines=1:length(wbFG.fibers)
     wbFG_streamLengths(istreamlines)=sum(sqrt(sum(diff(wbFG.fibers{istreamlines},1,2).^2)));
+    
 end
+
 
 results.LiFEstats.fe_name=fe.name;
 
@@ -102,6 +114,10 @@ results.LiFEstats.RMSE.WB_norm_total=sum(allvoxelsErr(~isnan(allvoxelsErr)));
 results.LiFEstats.WBFG.length_total=sum(wbFG_streamLengths);
 results.LiFEstats.validated.streams_length_total=sum(pos_fg_streamLengths);
 results.LiFEstats.validated.WBFG_length_reduc_proportion=results.LiFEstats.validated.streams_length_total/results.LiFEstats.WBFG.length_total;
+
+%Volume Measures
+%results.LiFEstats.WBFG.WMvolume=length(wbFGVolVec);
+%results.LiFEstats.validated.WMvolume=length(posVolVec);
 
 % Computes total number of connectome streamlines and the number that are
 % validated by LiFE.  Computes the survivorship proportion.  Standard for
@@ -156,8 +172,13 @@ if ~notDefined('classification')
         results.AFQstats.validated.classified_stream_count=length(find(classification.index));
         % Divides the AFQ classification count by the total WBFG streamline
         % count to get the proportion of streamlines classified by AFQ
-        results.AFQstats.validated.classified_stream_proportion=results.AFQstats.validated.classified_streams_count/results.LiFEstats.WBFG.stream_count;
+        results.AFQstats.validated.classified_stream_proportion=results.AFQstats.validated.classified_stream_count/results.LiFEstats.WBFG.stream_count;
         % NOTE: these streamlines are both AFQ classified AND LiFE validated
+        
+        % in theory this is unnecessary, as this vector should just be
+        % every streamline. i.e. each member of AFQIndexVec is a member of
+        % PosIndexes
+        survivorVec=AFQIndexVec(ismember(AFQIndexVec,posIndexes));
         
         results.AFQstats.validated.classified_stream_avg_length=mean(wbFG_streamLengths(AFQIndexVec));
         results.AFQstats.validated.classified_stream_length_stdev=std(wbFG_streamLengths(AFQIndexVec));
@@ -201,7 +222,7 @@ if ~notDefined('classification')
         % generating about 800 extra fibers, which completely screws up the
         % indexing scheme.
         fprintf('\n Likely cause is default interhemisphericsplit behavior of AFQ\n');
-        %keyboard
+        keyboard
         
     end
     
@@ -323,16 +344,27 @@ end
         tractProportion(itracts)=length(find(classification.index==itracts))/length(classification.index);
     end
     
-    plotInput(1,:)=tractProportion(1:2:end);
-    plotInput(2,:)=tractProportion(2:2:end);
+    % THIS IS A KUDGE DUE TO THE ISSUES CAUSED BY INTERHEMISPHERIC FIBERS
+    % AND ODD NUMBERS OF TRACTS
+    plotInput=zeros(2,(length(tractProportion)-sum(interHemiNames))/2);
     
-    for ilabels=1:length(tractNames)/2
+    plotInput(1,1)=tractProportion(1);
+    plotInput(2,1)=sum(tractProportion( 2:sum(interHemiNames)));
+     
+    plotInput(1,:)=tractProportion((sum(interHemiNames)+1):2:end);
+    plotInput(2,:)=tractProportion((sum(interHemiNames)+2):2:end);
+    labelNames{1}=tractNames{1};
+    for ilabels=2:(length(tractNames)-(sum(interHemiNames)))/2
         curName=tractNames{ilabels*2};
         spaceindexes=strfind(curName,' ');
+        if ~isempty(spaceindexes)
         labelNames{ilabels}=curName(spaceindexes(1)+1:end);
+        else
+            labelNames{ilabels}=curName;
+        end
     end
     
-    subplot(3,3,[7,8,9])
+    bottomPlot=subplot(3,3,[7,8,9])
     hold on
     bar((plotInput')*100)
     title('Proportion of connectome streamlines in tract')
@@ -340,8 +372,13 @@ end
     xlabel('Tract')
     ylabel('% classificaiton input streamlines in tract (%)')
     ylim([-0 2])
-    set(gca,'xtick',1:1:length(labelNames))
+    set(gca,'xtick',[1:1:length(labelNames)])
     set(gca,'XTickLabel',labelNames, 'FontSize',8,'FontName','Times')
+    bottomPlot.XTickLabelRotation=-45
+    
+    %textual otputs (save for later)
+    
+    %text(.5,1.75)
     
 else
     %% standard Life Plots
@@ -380,10 +417,8 @@ end
 figHandle=gcf;
 
 if ~notDefined('saveDir')
-    saveas(gcf,strcat(saveDir,'/fe_AFQ_StatPlot.png'));
+    saveas(gcf,strcat(saveDir,'/fe_AFQ_StatPlot.eps'));
     save(strcat(saveDir,'/fe_AFQ_resultStruc.mat'),'results')
 end
 
 end
-
-
